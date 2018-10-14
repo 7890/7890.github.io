@@ -21,8 +21,10 @@ $.fn.playblack=function(id)
 	//the layout is largely based on PB_BLOCK_SIZE
 	//see set_block_size() to dynamically change it
 	var PB_DEFAULT_BLOCK_SIZE=80;
-	var block_size=PB_DEFAULT_BLOCK_SIZE;
+	var left_off=0; //set in set_block_size()
 	var load_region_height=7;
+	var progress_poller; //interval set in "loadeddata" handler
+	var poll_ms=50; //if duration < 60 sec
 
 	// /!\ utf-8 char
 	var HTML_WARN_PREFIX="&#9888;&nbsp;";
@@ -46,24 +48,29 @@ $.fn.playblack=function(id)
 		, "title":        null  //text or html (artist, song title, ...)
 		, "cover":        null  //url to cover image
 		, "cover_link":   null  //href for cover image (best displayed if image has quadratic dimensions)
-		, "waveform":     null  //url to waveform image (a wide image, for instance 1000x200, transparent background, bright waveform)
+		, "wave":         null  //url to waveform image (a wide image, for instance 1000x200, transparent background, bright waveform)
 		, "repeat":       false //bool: if true, repeat track play
 		, "autoplay":     true  //bool: if true, start playback when ready
 		, "navplay":      true  //bool: if true, start playback on clicks and drags even if paused
-		, "seek":         0     //initial seek in seconds
-		, "volume":       1     //0..1: initial volume (0=mute, 1=100%)
-		, "rate":         1     //0.5..4: initial playback rate (same pitch, different speed)
+		, "seek":         0     //float 0... initial seek in seconds
+		, "volume":       1     //float 0..1: initial volume (0=mute, 1=100%)
+		, "rate":         1     //float 0.5..4: initial playback rate (same pitch, different speed)
 		, "show_url":     false //bool: if true, add audio url as <a> link to title 
 		, "bufreg":       true  //bool: if true, show buffered (loaded) regions
 		, "hidden":       false //bool: if true, hide player
+		, "show_cover":   true //bool
+		, "show_buttons": true //bool
+		, "size":         PB_DEFAULT_BLOCK_SIZE //int: block size
 	};
 
 	//filled and merged with user params in load()
 	var params={};
 
+	var pb_creation_time=new Date().getTime();
+
 	var player_id;
 	if(id != undefined && id != null) {player_id=id; /*function arg*/}
-	else {player_id="pb_"+new Date().getTime();}
+	else {player_id="pb_"+pb_creation_time;}
 
 	_clog("player_id: "+player_id);
 
@@ -118,6 +125,8 @@ $.fn.playblack=function(id)
 	var is_playing;
 	var is_seeking;
 
+	var pb_load_call_time;
+
 	var full_buffer_drawn; //once drawn, don't redraw buffer load regions
 	var load_region_container_toggle=0; //alternate div to prevent flicker (draw to n%2 then remove n+1%2)
 
@@ -147,6 +156,8 @@ $.fn.playblack=function(id)
 		can_play_through=false;
 		is_playing=false;
 		is_seeking=false;
+
+		pb_load_call_time=0;
 
 		full_buffer_drawn=false;
 		load_region_container_toggle=0;
@@ -180,7 +191,6 @@ $.fn.playblack=function(id)
 		time_mousepos_div=      player_div.find(".pb_time_mouse_position");
 
 		progress_container_div= player_div.find(".pb_progress_container");
-
 		progress_div=           player_div.find(".pb_progress_over");
 		nav_div=                player_div.find(".pb_navigate_over");
 		wave_img=               player_div.find(".pb_wave_image");
@@ -386,6 +396,7 @@ $.fn.playblack=function(id)
 			is_playing=false;
 			is_seeking=false;
 			full_buffer_drawn=false;
+			pb_load_call_time=new Date().getTime();
 		});
 
 		audio_ctx.addEventListener("durationchange", function()
@@ -411,6 +422,7 @@ $.fn.playblack=function(id)
 				nav_div.css({"display":"inline-block"});
 				time_mousepos_div.css({"display":"inline-block"});
 			}
+			create_position_poller();
 			set_mouse_cursor();
 
 			if(callbacks[CB_LOADED]!=undefined)
@@ -574,7 +586,7 @@ $.fn.playblack=function(id)
 	{
 		create_html();
 		init_variables();
-		set_block_size(block_size);
+		set_block_size(PB_DEFAULT_BLOCK_SIZE);
 		attach_listeners();
 		reset_elements();
 		init_audio_context();
@@ -599,8 +611,8 @@ $.fn.playblack=function(id)
 
 		duration=0;
 		current_time=0;
-		reset_elements();
-		time_and_status_div.html("Loading...");
+
+		last_error='';
 
 		//clear
 		params={};
@@ -610,6 +622,10 @@ $.fn.playblack=function(id)
 		params=$.extend(true, params, playitem);
 
 		if(params.hidden){hide();}
+
+		set_block_size(params.size);
+		reset_elements();
+		time_and_status_div.html("Loading...");
 
 		if(!playitem.audio || playitem.audio==undefined)
 		{
@@ -634,7 +650,6 @@ $.fn.playblack=function(id)
 	var set_title=function()
 	{
 		var t;
-
 		if(params.title == null) {t=get_filename_from_url(params.audio);}
 		else {t=params.title;}
 
@@ -653,12 +668,14 @@ $.fn.playblack=function(id)
 		set_mouse_cursor();
 		if(params.bufreg)
 		{
-			var b=audio_ctx.buffered;
+/*			var b=audio_ctx.buffered;
 			if(
 				b.length==1
 				&& b.end(0)==duration
 				&& b.start(0)==0
 			) {display_load_regions();}
+*/
+			display_load_regions();
 		}
 	};
 
@@ -727,7 +744,7 @@ $.fn.playblack=function(id)
 		button_play_img.css({"display":"none"});
 		button_pause_img.css({"display":"none"});
 		busy_img.css({"display":"none"});
-		var w=$(window).width()-block_size;
+		var w=$(window).width()-params.size;
 		info_div.html(HTML_WARN_PREFIX+message);
 		info_div.css({"width":w+"px", "display":"block"});
 	};
@@ -923,7 +940,7 @@ from libsndfile:
 
 	var get_height=function()
 	{
-		return block_size+title_div.height();
+		return params.size+title_div.height();
 	};
 
 	var set_bottom_offset=function(val)
@@ -954,6 +971,9 @@ from libsndfile:
 			, "height":            get_height()
 			, "bottom":            set_bottom_offset()
 			, "last_error":        last_error
+			, "props_clone_time":  new Date().getTime()
+			, "creation_time":     pb_creation_time
+			, "last_load_time":    pb_load_call_time
 		}, params);
 	};
 
@@ -966,49 +986,58 @@ from libsndfile:
 	//most dimensions are derived from edge_length
 	var set_block_size=function(edge_length)
 	{
-		if(edge_length==undefined) {return block_size;}
-		block_size=edge_length;
+		if(edge_length==undefined) {return params.size;}
+		params.size=edge_length;
 
-		player_div.css({"height": (block_size)+"px"});
+		player_div.css({"height": (params.size)+"px"});
 
-		left_section_div.css({"width": (2*block_size)+"px", "height": block_size+"px"});
-		cover_div.css({"width": block_size+"px", "height": block_size+"px"});
-		cover_img.css({"width": (block_size-4)+"px", "height": (block_size-4)+"px"});
-		button_div.css({"width": block_size+"px", "height": block_size+"px"});
-		button_play_img.css({"width": (block_size-4)+"px", "height": (block_size-4)+"px"});
-		button_pause_img.css({"width": (block_size-4)+"px", "height": (block_size-4)+"px"});
-		busy_img.css({"width": (block_size-4)+"px", "height": (block_size-4)+"px"});
+		left_off=0;
+		if(params.show_cover){left_off+=params.size;}
+		if(params.show_buttons){left_off+=params.size;}
+		left_section_div.css({"width": (left_off)+"px", "height": params.size+"px"});
 
-		progress_div.css({"left": (2*block_size)+"px", "height": block_size+"px"});
-		nav_div.css({"left": (2*block_size)+"px", "height": block_size+"px"});
-		wave_img.css({"left": (2*block_size)+"px"});
-		info_div.css({"left": (block_size)+"px", "height": block_size+"px"});
-		mouse_nav_div.css({"left": (2*block_size)+"px", "height": block_size+"px"});
-		time_and_status_div.css({"left": (2*block_size)+"px"});
+		var w=0;
+		if(params.show_cover){w+=params.size;}
+		cover_div.css({"width": w+"px", "height": params.size+"px"});
+		cover_img.css({"width": (w-4)+"px", "height": (params.size-4)+"px"});
+
+		w=0;
+		if(params.show_buttons){w+=params.size;}
+		button_div.css({"width": w+"px", "height": params.size+"px"});
+		button_play_img.css({"width": Math.max(0,w-4)+"px", "height": (params.size-4)+"px"});
+		button_pause_img.css({"width": Math.max(0,w-4)+"px", "height": (params.size-4)+"px"});
+		busy_img.css({"width": Math.max(0,w-4)+"px", "height": (params.size-4)+"px"});
+
+		progress_div.css({"left": (left_off)+"px", "height": params.size+"px"});
+		nav_div.css({"left": (left_off)+"px", "height": params.size+"px"});
+		wave_img.css({"left": (left_off)+"px"});
+		info_div.css({"left": (w)+"px", "height": params.size+"px"});
+		mouse_nav_div.css({"left": (left_off)+"px", "height": params.size+"px"});
+		time_and_status_div.css({"left": (left_off)+"px"});
 
 		//if used on a touchscreen, show drag position above
 //		if (typeof window.orientation !== 'undefined')
 		if ('ontouchstart' in window)
 		{
-			time_mousepos_div.css({"left": (2*block_size)+"px", "margin-top": (-1.5*em_pixel_time)+"px"});
+			time_mousepos_div.css({"left": (left_off)+"px", "margin-top": (-1.5*em_pixel_time)+"px"});
 		}
 		else
 		{
-			time_mousepos_div.css({"left": (2*block_size)+"px", "margin-top": (block_size - 1.5*em_pixel_time)+"px"});
+			time_mousepos_div.css({"left": (left_off)+"px", "margin-top": (params.size - 1.5*em_pixel_time)+"px"});
 		}
 
 		delay_page_end_div.css({"height": get_height()+"px"});
 
 		$(window).resize();
 
-		return block_size;
+		return params.size;
 	}; /*end set_block_size*/
 
 	var seconds_to_pixels=function(sec)
 	{
-		if(duration<=0 || sec <=0) {return 2*block_size;}
+		if(duration<=0 || sec <=0) {return left_off;}
 		var f=sec/duration;
-		return 2*block_size + ($(window).width()-2*block_size) * f;
+		return left_off + ($(window).width()-left_off) * f;
 	};
 
 	var bufreg=function(bool)
@@ -1063,7 +1092,7 @@ from libsndfile:
 //			_clog("range: "+i+" start: "+start_pixel+" end: "+end_pixel);
 
 			var child = $('<div class="pb_load_region" id="pb_lr_'+i+'"></div>');
-			child.css({"left":start_pixel, "width":(end_pixel-start_pixel), "margin-top":(block_size-load_region_height)+"px"});
+			child.css({"left":start_pixel, "width":(end_pixel-start_pixel), "margin-top":(params.size-load_region_height)+"px"});
 
 			if(cn==1) {load_region_container_1_div.append(child);}
 			else {load_region_container_2_div.append(child);}
@@ -1083,10 +1112,26 @@ from libsndfile:
 		load_region_container_toggle++;
 	}; /*end display_load_regions()*/
 
+	var create_position_poller=function()
+	{
+		clearInterval(progress_poller);
+		if(duration>=60){return;}
+
+		progress_poller=setInterval(function()
+		{
+			if(is_playing)
+			{
+				current_time=audio_ctx.currentTime;
+				set_play_progress();
+				set_time_info();
+			}
+		}, poll_ms);
+	};
+
 	var set_play_progress=function()
 	{
 		var f=current_time/duration;
-		progress_div.width((($(window).width()-2*block_size) * f) +"px");
+		progress_div.width((($(window).width()-left_off) * f) +"px");
 	};
 
 	var set_mouse_cursor=function()
@@ -1094,11 +1139,11 @@ from libsndfile:
 		//if touch (start, move, end) x coordinate is available, use it
 		if(last_touch_clientx>0) {last_clientx=last_touch_clientx;}
 //		_clog("set_mouse_cursor()");
-		if(last_clientx<2*block_size){return;}
+		if(last_clientx<left_off){return;}
 		//total window width minus 2 blocks (cover, button)
-		var w=$(window).width()-2*block_size;
+		var w=$(window).width()-left_off;
 		//mouse x position inside main area (waveform, progress, ...)
-		var m=last_clientx-2*block_size;
+		var m=last_clientx-left_off;
 		//mouse position inside track as a factor
 		var f=m/w;
 		mouse_position_s=duration * f;
@@ -1111,7 +1156,7 @@ from libsndfile:
 		//position the mouse cursor time (12:34) container
 		var dw=time_mousepos_div.width()+2*5;
 		var left;
-		if(m<=dw) {left=2*block_size;}
+		if(m<=dw) {left=left_off;}
 		else {left=last_clientx-dw;}
 		time_mousepos_div.css({"left": left});
 	};/*end set_mouse_cursor()*/
@@ -1133,10 +1178,10 @@ from libsndfile:
 		var cut_start=11;
 		var cut_length=8;
 
-		if(duration<10) //s.xxx
+		if(duration<60) //ss.xxx
 		{
-			cut_start+=7;
-			cut_length=5;
+			cut_start+=6;
+			cut_length=6;
 		}
 		else if(duration<600)//m:ss
 		{
@@ -1197,9 +1242,9 @@ from libsndfile:
 		//if elements are not yet initialized
 		if(player_div==undefined) {return;}
 
-		wave_img.width(($(window).width()-2*block_size)+"px");
-		wave_img.height(block_size+"px");
-		info_div.width(($(window).width()-block_size)+"px");
+		wave_img.width(($(window).width()-left_off)+"px");
+		wave_img.height(params.size+"px");
+		info_div.width(($(window).width()-params.size)+"px");
 
 		full_buffer_drawn=false;
 		display_load_regions();

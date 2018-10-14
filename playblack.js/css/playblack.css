@@ -128,19 +128,26 @@ stylesheet for 'playblack' (sticky html5 audio player)
 .pb_button_image {
 	padding: 2px;
 	cursor: pointer;
+	-webkit-animation: fadeIn 0.1s;
+	animation: fadeIn 0.1s;
 }
 
 .pb_button_image:hover {
-	background: -webkit-radial-gradient(rgba(170,170,80,0.5), rgba(170,170,80,0.1));
-	background:    -moz-radial-gradient(rgba(170,170,80,0.5), rgba(170,170,80,0.1));
-	background:     -ms-radial-gradient(rgba(170,170,80,0.5), rgba(170,170,80,0.1));
-	background:         radial-gradient(rgba(170,170,80,0.5), rgba(170,170,80,0.1));
+
+	background: -webkit-radial-gradient(rgba(170,170,170,0.5), rgba(170,170,170,0.0));
+	background:    -moz-radial-gradient(rgba(170,170,170,0.5), rgba(170,170,170,0.0));
+	background:     -ms-radial-gradient(rgba(170,170,170,0.5), rgba(170,170,170,0.0));
+	background:         radial-gradient(rgba(170,170,170,0.5), rgba(170,170,170,0.0));
+
 }
 
 .pb_button_play {
 }
 
 .pb_button_pause {
+}
+
+.pb_status_busy {
 }
 
 .pb_time {
@@ -228,9 +235,6 @@ stylesheet for 'playblack' (sticky html5 audio player)
 	padding: 0;
 }
 
-.pb_status_busy {
-}
-
 .noselect {
 	-webkit-touch-callout: none;
 	-webkit-user-select: none;
@@ -239,4 +243,14 @@ stylesheet for 'playblack' (sticky html5 audio player)
 	-ms-user-select: none;
 	user-select: none;
 }
+
+@-webkit-keyframes fadeIn {
+    from { opacity: 0; }
+      to { opacity: 1; }
+}  
+@keyframes fadeIn {
+    from { opacity: 0; }
+      to { opacity: 1; }
+}
+
 /*EOF*/
